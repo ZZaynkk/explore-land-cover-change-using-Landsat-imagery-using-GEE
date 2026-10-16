@@ -1,102 +1,97 @@
-# explore-land-cover-change-using-Landsat-imagery-using-GEE
-Google Earth Engine analysis of land-cover change in the Toshka–Lake Nasser region, Egypt (2013–2024), using Landsat 8, NDVI and MNDWI for classification, area statistics and change detection.
+# GISCI241 — Project images / 项目图片与标注
 
-## Research question
+Toshka–Lake Nasser region, southern Egypt / 埃及南部 Toshka–Lake Nasser 地区。
 
-How did vegetation, water and other land cover change across the
-study area between 2013 and 2024?
+本文件夹仅包含 12 张用户上传的原始图片和本说明，不包含代码或统计数据文件。原图内容未编辑，文件名已按年份及类型整理。
 
-## Project files
+## 标注依据 / Caption provenance
 
-- `src/land_cover_change.js`: complete Earth Engine analysis.
-- `results/land_cover_area_km2.csv`: recorded area statistics.
-- `results/transitions_2013_2024_km2.csv`: recorded transition areas.
+年份依据本对话中用户确认的顺序：最初四张为 2013、2018、2019、2024；后续三张分类图为 2019、2018、2013。NDVI 和 MNDWI 的 2024 年份依据同一分析阶段的上下文标注，原图本身未显示年份。前四张来自早期全年浏览流程，后续图来自分类分析阶段；请勿将两种合成窗口混为一谈。
 
-## How to run
+## 图例 / Legends
 
-1. Open https://code.earthengine.google.com/
-2. Sign in with an Earth Engine-enabled account.
-3. Copy `src/land_cover_change.js` into a new script.
-4. Click Run.
-5. Use Layers to view maps and Console to inspect statistics.
+- 真彩色：Landsat 8 B4/B3/B2 对应红/绿/蓝显示通道。
+- NDVI：棕色表示较低值，浅色至青绿色表示较高值；原代码显示范围为 −0.2 至 0.8。
+- MNDWI：棕色表示较低值，青绿色表示较高值；原代码显示范围为 −0.6 至 0.6。
+- 初步分类：浅棕色 Other；绿色 Vegetation；蓝色 Water。规则为 MNDWI > 0 判为水体，非水体中 NDVI > 0.2 判为植被，其余有效像元为 Other。
+- 变化图：绿色 Other → Vegetation；蓝色 Other → Water；橙色 Vegetation → Other；紫色 Vegetation → Water；金黄色 Water → Other；粉红色 Water → Vegetation。未变化像元被掩膜，底图仍可见；底图颜色不是变化类别。
 
-This program runs in Google Earth Engine, not directly on GitHub
-or in Node.js. No npm packages are required.
+这些是地图截图，不是带地理参考的栅格。分类是初步阈值分类，没有独立精度验证。Other 不等于单一裸地类别，Vegetation 不等于全部耕地。
 
-## Study area
+## 图片目录 / Gallery
 
-Toshka–Lake Nasser region, southern Egypt.
+### 2013 True colour / 真彩色（早期全年合成）
 
-Bounding coordinates:
-- West: 31.03790606
-- South: 22.46568687
-- East: 32.3617586
-- North: 23.36880901
+![2013 True colour / 真彩色（早期全年合成）](figures/01_true_colour_2013_exploratory.png)
 
-## Data and preprocessing
+原始文件 / Original: `image(20261013-192659).png`
 
-- Dataset: LANDSAT/LC08/C02/T1_TOA
-- Years: 2013, 2018, 2019, 2024
-- Period: April–December in each year
-- Scene cloud cover: less than 20%
-- QA_PIXEL bits 0–5 masked
-- Saturated pixels masked using QA_RADSAT
-- Median spectral composite for each year
+### 2018 True colour / 真彩色（早期全年合成）
 
-## Spectral indices
+![2018 True colour / 真彩色（早期全年合成）](figures/02_true_colour_2018_exploratory.png)
 
-NDVI = (B5 - B4) / (B5 + B4)
+原始文件 / Original: `image(20261013-192707).png`
 
-MNDWI = (B3 - B6) / (B3 + B6)
+### 2019 True colour / 真彩色（早期全年合成）
 
-Indices are calculated from the median spectral composite.
+![2019 True colour / 真彩色（早期全年合成）](figures/03_true_colour_2019_exploratory.png)
 
-## Preliminary classification
+原始文件 / Original: `image(20261013-192714).png`
 
-| Code | Class | Rule |
-| --- | --- | --- |
-| 0 | Other | Remaining valid pixels |
-| 1 | Vegetation | NDVI > 0.2 and not water |
-| 2 | Water | MNDWI > 0 |
+### 2024 True colour / 真彩色（早期全年合成）
 
-Water takes priority.
+![2024 True colour / 真彩色（早期全年合成）](figures/04_true_colour_2024_exploratory.png)
 
-## Area and change detection
+原始文件 / Original: `image(20261013-192721).png`
 
-Statistics use pixels valid in all four years.
+### 2024 NDVI / 归一化植被指数
 
-Pixel areas are summed at 30 m resolution using EPSG:32636.
-Areas are reported in square kilometres.
+![2024 NDVI / 归一化植被指数](figures/05_ndvi_2024.png)
 
-Post-classification comparison uses:
+原始文件 / Original: `image(20261013-193735).png`
 
-transition = class_2013 × 3 + class_2024
+### 2024 MNDWI / 改进归一化差异水体指数
 
-Six transitions between different classes are reported.
+![2024 MNDWI / 改进归一化差异水体指数](figures/06_mndwi_2024.png)
 
-## Recorded results
+原始文件 / Original: `image(20261013-193752).png`
 
-The CSV files contain previously recorded project outputs.
-They were not regenerated during project packaging.
+### 2024 Preliminary land cover / 初步土地覆盖分类
 
-Between 2013 and 2024:
-- Vegetation increased by approximately 529.749 km².
-- Water increased by approximately 850.364 km².
-- Other land cover decreased by approximately 1380.113 km².
+![2024 Preliminary land cover / 初步土地覆盖分类](figures/07_land_cover_2024.png)
 
-## Limitations
+原始文件 / Original: `image(20261013-194108).png`
 
-This is preliminary threshold-based classification.
-No independent accuracy assessment was performed.
+### 2024 True colour / 分类阶段的真彩色参照图
 
-Vegetation does not represent all farmland.
-Other is a residual category, not exclusively bare land.
-Coverage_percent measures valid spatial coverage, not accuracy.
+![2024 True colour / 分类阶段的真彩色参照图](figures/08_true_colour_2024.png)
 
-Seasonality, compositing and threshold selection can affect results.
-The analysis alone does not establish the causes of observed changes.
+原始文件 / Original: `image(20261013-194128).png`
 
-## Validation
+### 2019 Preliminary land cover / 初步土地覆盖分类
 
-The main script passed JavaScript syntax checking.
-Earth Engine execution was not repeated during packaging.
+![2019 Preliminary land cover / 初步土地覆盖分类](figures/09_land_cover_2019.png)
+
+原始文件 / Original: `image(20261013-194736).png`
+
+### 2018 Preliminary land cover / 初步土地覆盖分类
+
+![2018 Preliminary land cover / 初步土地覆盖分类](figures/10_land_cover_2018.png)
+
+原始文件 / Original: `image(20261013-194757).png`
+
+### 2013 Preliminary land cover / 初步土地覆盖分类
+
+![2013 Preliminary land cover / 初步土地覆盖分类](figures/11_land_cover_2013.png)
+
+原始文件 / Original: `image(20261013-194816).png`
+
+### 2013–2024 Land-cover changes / 土地覆盖变化
+
+![2013–2024 Land-cover changes / 土地覆盖变化](figures/12_changes_2013_2024.png)
+
+原始文件 / Original: `image(20261013-195320).png`
+
+## 上传 GitHub
+
+下载后解压，将整个 `GISCI241_Images` 文件夹拖入仓库的 Add file → Upload files 页面并提交。打开该文件夹的 README.md 即可查看图片及标注。也可直接上传 ZIP 作为下载附件，但仓库中不会直接展开显示其中的图片。
