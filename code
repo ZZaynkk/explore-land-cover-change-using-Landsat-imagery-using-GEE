@@ -1,0 +1,465 @@
+// ============================================================
+// GISCI241 Project
+// Land-cover change in the Toshka–Lake Nasser region
+// Years: 2013, 2018, 2019, 2024
+//
+// 在 Google Earth Engine Code Editor 中运行。
+// 分类：0 = Other；1 = Vegetation；2 = Water。
+// ============================================================
+
+
+// ------------------------------------------------------------
+// 1. 研究区域与参数
+// ------------------------------------------------------------
+
+var geometry = ee.Geometry.Rectangle([
+  31.03790606, 22.46568687,
+  32.3617586, 23.36880901
+]);
+
+var years = [2013, 2018, 2019, 2024];
+
+var ndviThreshold = 0.2;
+var waterThreshold = 0;
+
+Map.centerObject(geometry, 9);
+
+// 面积统计统一使用 UTM Zone 36N、30 m 分辨率。
+var areaOptions = {
+  reducer: ee.Reducer.sum(),
+  geometry: geometry,
+  crs: 'EPSG:32636',
+  scale: 30,
+  maxPixels: 1e9,
+  tileScale: 4
+};
+
+
+// ------------------------------------------------------------
+// 2. 去除云、云影、雪和饱和像元
+// ------------------------------------------------------------
+
+function maskLandsat(image) {
+  // QA_PIXEL 第 0–5 位：
+  // 填充值、膨胀云、卷云、云、云影、雪。
+  var qaMask = image
+    .select('QA_PIXEL')
+    .bitwiseAnd(63)
+    .eq(0);
+
+  var saturationMask = image
+    .select('QA_RADSAT')
+    .eq(0);
+
+  return image
+    .updateMask(qaMask)
+    .updateMask(saturationMask)
+    .select(['B2', 'B3', 'B4', 'B5', 'B6', 'B7'])
+    .copyProperties(image, ['system:time_start']);
+}
+
+
+// ------------------------------------------------------------
+// 3. 显示参数
+// ------------------------------------------------------------
+
+var rgbVis = {
+  bands: ['B4', 'B3', 'B2'],
+  min: 0,
+  max: 0.5
+};
+
+var ndviVis = {
+  min: -0.2,
+  max: 0.8,
+  palette: [
+    '8c510a',
+    'dfc27d',
+    'f6e8c3',
+    'c7eae5',
+    '5ab4ac',
+    '01665e'
+  ]
+};
+
+var waterVis = {
+  min: -0.6,
+  max: 0.6,
+  palette: [
+    'a6611a',
+    'dfc27d',
+    'f5f5f5',
+    '80cdc1',
+    '018571'
+  ]
+};
+
+var classVis = {
+  min: 0,
+  max: 2,
+  palette: [
+    'e5c687', // Other
+    '228b22', // Vegetation
+    '2166ac'  // Water
+  ]
+};
+
+
+// ------------------------------------------------------------
+// 4. 获取影像，生成中位数合成，计算 NDVI 和 MNDWI
+// ------------------------------------------------------------
+
+var composites = {};
+
+years.forEach(function(year) {
+  // 使用每年 4 月 1 日至 12 月 31 日。
+  // filterDate 不包含结束日期，因此设为下一年的 1 月 1 日。
+  var collection = ee.ImageCollection(
+    'LANDSAT/LC08/C02/T1_TOA'
+  )
+    .filterBounds(geometry)
+    .filterDate(
+      year + '-04-01',
+      (year + 1) + '-01-01'
+    )
+    .filter(ee.Filter.lt('CLOUD_COVER', 20))
+    .map(maskLandsat);
+
+  print(
+    'Image count, Apr-Dec ' + year,
+    collection.size()
+  );
+
+  var composite = collection
+    .median()
+    .clip(geometry);
+
+  // NDVI = (NIR - Red) / (NIR + Red)
+  var ndvi = composite
+    .normalizedDifference(['B5', 'B4'])
+    .rename('NDVI');
+
+  // MNDWI = (Green - SWIR1) / (Green + SWIR1)
+  var mndwi = composite
+    .normalizedDifference(['B3', 'B6'])
+    .rename('MNDWI');
+
+  // 先合成光谱波段，再计算指数。
+  composites[year] = composite
+    .addBands(ndvi)
+    .addBands(mndwi);
+
+  Map.addLayer(
+    composite,
+    rgbVis,
+    year + ' True colour',
+    false
+  );
+
+  Map.addLayer(
+    ndvi,
+    ndviVis,
+    year + ' NDVI',
+    false
+  );
+
+  Map.addLayer(
+    mndwi,
+    waterVis,
+    year + ' MNDWI',
+    false
+  );
+
+  // 每个像元参与合成的有效 B4 观测次数。
+  Map.addLayer(
+    collection.select('B4').count().clip(geometry),
+    {
+      min: 0,
+      max: 30,
+      palette: ['red', 'yellow', 'green']
+    },
+    year + ' Valid observations',
+    false
+  );
+});
+
+
+// ------------------------------------------------------------
+// 5. 初步土地覆盖分类
+// ------------------------------------------------------------
+
+// 分类规则：
+// Water：MNDWI > 0。
+// Vegetation：NDVI > 0.2，且不是 Water。
+// Other：其余有效像元。
+//
+// 这是阈值分类，不是监督分类或 K-means 分类。
+// Vegetation 不等于全部耕地，Other 也不等于单一裸地类别。
+
+var classifiedImages = {};
+
+years.forEach(function(year) {
+  var image = composites[year];
+
+  var ndvi = image.select('NDVI');
+  var mndwi = image.select('MNDWI');
+
+  var validMask = ndvi.mask().and(mndwi.mask());
+
+  var water = mndwi.gt(waterThreshold);
+
+  var vegetation = ndvi
+    .gt(ndviThreshold)
+    .and(water.not());
+
+  var classified = ndvi
+    .multiply(0)
+    .where(vegetation, 1)
+    .where(water, 2)
+    .updateMask(validMask)
+    .rename('landcover')
+    .toByte();
+
+  classifiedImages[year] = classified;
+
+  Map.addLayer(
+    classified,
+    classVis,
+    year + ' Preliminary land cover',
+    year === 2024
+  );
+});
+
+
+// ------------------------------------------------------------
+// 6. 四个年份共同有效的区域
+// ------------------------------------------------------------
+
+// 只在四年都有有效分类的像元上进行面积统计与变化检测。
+var commonMask = classifiedImages[2013]
+  .mask()
+  .unmask(0);
+
+[2018, 2019, 2024].forEach(function(year) {
+  commonMask = commonMask.and(
+    classifiedImages[year].mask().unmask(0)
+  );
+});
+
+// 像元面积：平方米转为平方公里。
+var pixelKm2 = ee.Image.pixelArea().divide(1e6);
+
+// 整个研究区域面积。
+var regionKm2 = ee.Number(
+  pixelKm2
+    .rename('area')
+    .reduceRegion(areaOptions)
+    .get('area')
+);
+
+
+// ------------------------------------------------------------
+// 7. 各年份土地覆盖面积统计
+// ------------------------------------------------------------
+
+var areaFeatures = years.map(function(year) {
+  var classified = classifiedImages[year]
+    .updateMask(commonMask);
+
+  var areaBands = classified
+    .eq(0)
+    .rename('Other_km2')
+    .addBands(
+      classified.eq(1).rename('Vegetation_km2')
+    )
+    .addBands(
+      classified.eq(2).rename('Water_km2')
+    )
+    .multiply(pixelKm2);
+
+  var stats = areaBands.reduceRegion(areaOptions);
+
+  var other = ee.Number(stats.get('Other_km2'));
+
+  var vegetation = ee.Number(
+    stats.get('Vegetation_km2')
+  );
+
+  var water = ee.Number(stats.get('Water_km2'));
+
+  var validArea = other
+    .add(vegetation)
+    .add(water);
+
+  return ee.Feature(null, {
+    Year: year,
+    Other_km2: other,
+    Vegetation_km2: vegetation,
+    Water_km2: water,
+    Common_valid_km2: validArea,
+    Coverage_percent: validArea
+      .divide(regionKm2)
+      .multiply(100)
+  });
+});
+
+var areaTable = ee.FeatureCollection(areaFeatures)
+  .sort('Year');
+
+print('Preliminary area results (km2)', areaTable);
+
+print(
+  ui.Chart.feature.byFeature(
+    areaTable,
+    'Year',
+    [
+      'Other_km2',
+      'Vegetation_km2',
+      'Water_km2',
+      'Common_valid_km2',
+      'Coverage_percent'
+    ]
+  ).setChartType('Table')
+);
+
+// 注意：Coverage_percent 表示有效分析区域覆盖比例，
+// 不是分类准确率。
+
+
+// ------------------------------------------------------------
+// 8. 2013—2024 年分类后变化检测
+// ------------------------------------------------------------
+
+var startClass = classifiedImages[2013]
+  .updateMask(commonMask);
+
+var endClass = classifiedImages[2024]
+  .updateMask(commonMask);
+
+// 转移编码 = 2013 类别 × 3 + 2024 类别。
+//
+// 0 = Other → Other
+// 1 = Other → Vegetation
+// 2 = Other → Water
+// 3 = Vegetation → Other
+// 4 = Vegetation → Vegetation
+// 5 = Vegetation → Water
+// 6 = Water → Other
+// 7 = Water → Vegetation
+// 8 = Water → Water
+
+var transition = startClass
+  .multiply(3)
+  .add(endClass)
+  .rename('transition');
+
+// 变化地图只显示发生类别变化的像元。
+var changed = transition.updateMask(
+  startClass.neq(endClass)
+);
+
+Map.addLayer(
+  changed,
+  {
+    min: 0,
+    max: 8,
+    palette: [
+      'dddddd',
+      '228b22',
+      '2166ac',
+      'd95f02',
+      'dddddd',
+      '984ea3',
+      'e6ab02',
+      'e7298a',
+      'dddddd'
+    ]
+  },
+  'Changes 2013-2024',
+  false
+);
+
+
+// ------------------------------------------------------------
+// 9. 六种土地覆盖转移的面积
+// ------------------------------------------------------------
+
+var changeBands = transition
+  .eq(1)
+  .rename('Other_to_Vegetation')
+  .addBands(
+    transition.eq(2).rename('Other_to_Water')
+  )
+  .addBands(
+    transition.eq(3).rename('Vegetation_to_Other')
+  )
+  .addBands(
+    transition.eq(5).rename('Vegetation_to_Water')
+  )
+  .addBands(
+    transition.eq(6).rename('Water_to_Other')
+  )
+  .addBands(
+    transition.eq(7).rename('Water_to_Vegetation')
+  )
+  .multiply(pixelKm2);
+
+var transitionStats = changeBands.reduceRegion(
+  areaOptions
+);
+
+print(
+  'Transitions 2013-2024 (km2)',
+  transitionStats
+);
+
+
+/*
+------------------------------------------------------------
+附录：最初的全年真彩色影像浏览代码
+------------------------------------------------------------
+
+下面的代码保留了最初的探索步骤，默认不执行。
+如需要使用，请单独复制到一个新脚本。
+
+注意：它使用全年窗口，没有逐像元 QA 掩膜，
+与上面最终分析使用的 4—12 月处理流程不同。
+
+var geometry = ee.Geometry.Rectangle([
+  31.03790606, 22.46568687,
+  32.3617586, 23.36880901
+]);
+
+Map.centerObject(geometry, 9);
+
+var years = [2013, 2018, 2019, 2024];
+
+var vis = {
+  bands: ['B4', 'B3', 'B2'],
+  min: 0,
+  max: 0.5
+};
+
+years.forEach(function(year) {
+  var collection = ee.ImageCollection(
+    'LANDSAT/LC08/C02/T1_TOA'
+  )
+    .filterBounds(geometry)
+    .filterDate(
+      year + '-01-01',
+      (year + 1) + '-01-01'
+    )
+    .filter(ee.Filter.lt('CLOUD_COVER', 20));
+
+  print('Image count ' + year, collection.size());
+
+  var composite = collection.median().clip(geometry);
+
+  Map.addLayer(
+    composite,
+    vis,
+    String(year),
+    year === 2024
+  );
+});
+*/
